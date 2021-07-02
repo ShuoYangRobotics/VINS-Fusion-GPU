@@ -14,7 +14,7 @@
 #include <Eigen/Dense>
 #include "../utility/utility.h"
 #include "../utility/tic_toc.h"
-// #include "../estimator/parameters.h"
+#include "../estimator/parameters.h"
 
 class ProjectionFactor : public ceres::SizedCostFunction<2, 7, 7, 7, 1>
 {

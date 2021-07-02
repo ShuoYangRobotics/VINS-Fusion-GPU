@@ -31,7 +31,7 @@ double distance_2(const cv::Point2f& pt1, const cv::Point2f& pt2)
 {
     double dx = pt1.x - pt2.x;
     double dy = pt1.y - pt2.y;
-    return dx * dx + dy * dy;
+    return sqrt(dx * dx + dy * dy);
 }
 
 void reduceVector(vector<cv::Point2f> &v, vector<uchar> status)
@@ -573,8 +573,9 @@ void FeatureTracker::showUndistortion(const string &name)
             //ROS_ERROR("(%f %f) -> (%f %f)", distortedp[i].y, distortedp[i].x, pp.at<float>(1, 0), pp.at<float>(0, 0));
         }
     }
-    cv::imshow(name, undistortedImg);
-    cv::waitKey(0);
+    // turn the following code on if you need
+    // cv::imshow(name, undistortedImg);
+    // cv::waitKey(0);
 }
 
 vector<cv::Point2f> FeatureTracker::undistortedPts(vector<cv::Point2f> &pts, camodocal::CameraPtr cam)
@@ -681,12 +682,8 @@ void FeatureTracker::drawTrack(const cv::Mat &imLeft, const cv::Mat &imRight,
     */
     //printf("predict pts size %d \n", (int)predict_pts_debug.size());
 
-
     //cv::Mat imCur2Compress;
     //cv::resize(imCur2, imCur2Compress, cv::Size(cols, rows / 2));
-
-    cv::imshow("tracking", imTrack);
-    cv::waitKey(2);
 }
 
 
