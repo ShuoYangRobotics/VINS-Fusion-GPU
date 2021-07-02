@@ -19,16 +19,9 @@ bool FeatureTracker::inBorder(const cv::Point2f &pt)
     return BORDER_SIZE <= img_x && img_x < col - BORDER_SIZE && BORDER_SIZE <= img_y && img_y < row - BORDER_SIZE;
 }
 
-// double distance(cv::Point2f pt1, cv::Point2f pt2)
-// {
-//     //printf("pt1: %f %f pt2: %f %f\n", pt1.x, pt1.y, pt2.x, pt2.y);
-//     double dx = pt1.x - pt2.x;
-//     double dy = pt1.y - pt2.y;
-//     return sqrt(dx * dx + dy * dy);
-// }
-
-double distance_2(const cv::Point2f& pt1, const cv::Point2f& pt2)
+double distance(cv::Point2f pt1, cv::Point2f pt2)
 {
+    //printf("pt1: %f %f pt2: %f %f\n", pt1.x, pt1.y, pt2.x, pt2.y);
     double dx = pt1.x - pt2.x;
     double dy = pt1.y - pt2.y;
     return sqrt(dx * dx + dy * dy);
@@ -111,37 +104,36 @@ double FeatureTracker::distance(cv::Point2f &pt1, cv::Point2f &pt2)
 
 map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackImage(double _cur_time, const cv::Mat &_img, const cv::Mat &_img1)
 {
-    // TicToc t_r;
-
+    TicToc t_r;
     cur_time = _cur_time;
     cur_img = _img;
     row = cur_img.rows;
     col = cur_img.cols;
     cv::Mat rightImg = _img1;
-    cur_pts.clear();
-
-    cv::cuda::GpuMat cur_gpu_img;
-    cv::cuda::GpuMat right_gpu_Img;
-    if (USE_GPU_ACC_FLOW)
+    /*
     {
-        cur_gpu_img = cv::cuda::GpuMat(cur_img);
-        right_gpu_Img = cv::cuda::GpuMat(rightImg);
-        if (d_pyrLK_sparse.empty())
-             d_pyrLK_sparse = cv::cuda::SparsePyrLKOpticalFlow::create(cv::Size(LK_SIZE, LK_SIZE), LK_N, 30, false);
-        if (d_pyrLK_sparse_prediction.empty())
-             d_pyrLK_sparse_prediction = cv::cuda::SparsePyrLKOpticalFlow::create(cv::Size(LK_SIZE, LK_SIZE), 1, 30, true);
+        cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE(3.0, cv::Size(8, 8));
+        clahe->apply(cur_img, cur_img);
+        if(!rightImg.empty())
+            clahe->apply(rightImg, rightImg);
     }
+    */
+    cur_pts.clear();
 
     if (prev_pts.size() > 0)
     {
         vector<uchar> status;
         if(!USE_GPU_ACC_FLOW)
         {
+            TicToc t_o;
+            
             vector<float> err;
             if(hasPrediction)
             {
                 cur_pts = predict_pts;
-                cv::calcOpticalFlowPyrLK(prev_img, cur_img, prev_pts, cur_pts, status, err, cv::Size(LK_SIZE, LK_SIZE), 1, cv::TermCriteria(cv::TermCriteria::COUNT+cv::TermCriteria::EPS, 30, 0.01), cv::OPTFLOW_USE_INITIAL_FLOW);
+                cv::calcOpticalFlowPyrLK(prev_img, cur_img, prev_pts, cur_pts, status, err, cv::Size(21, 21), 1, 
+                cv::TermCriteria(cv::TermCriteria::COUNT+cv::TermCriteria::EPS, 30, 0.01), cv::OPTFLOW_USE_INITIAL_FLOW);
+                
                 int succ_num = 0;
                 for (size_t i = 0; i < status.size(); i++)
                 {
@@ -149,21 +141,24 @@ map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackIm
                         succ_num++;
                 }
                 if (succ_num < 10)
-        	        cv::calcOpticalFlowPyrLK(prev_img, cur_img, prev_pts, cur_pts, status, err, cv::Size(LK_SIZE, LK_SIZE), LK_N);
+                cv::calcOpticalFlowPyrLK(prev_img, cur_img, prev_pts, cur_pts, status, err, cv::Size(21, 21), 3);
             }
             else
-                cv::calcOpticalFlowPyrLK(prev_img, cur_img, prev_pts, cur_pts, status, err, cv::Size(LK_SIZE, LK_SIZE), LK_N);
+                cv::calcOpticalFlowPyrLK(prev_img, cur_img, prev_pts, cur_pts, status, err, cv::Size(21, 21), 3);
             // reverse check
             if(FLOW_BACK)
             {
                 vector<uchar> reverse_status;
                 vector<cv::Point2f> reverse_pts = prev_pts;
-                cv::calcOpticalFlowPyrLK(cur_img, prev_img, cur_pts, reverse_pts, reverse_status, err, cv::Size(LK_SIZE, LK_SIZE), 1, cv::TermCriteria(cv::TermCriteria::COUNT+cv::TermCriteria::EPS, 30, 0.01), cv::OPTFLOW_USE_INITIAL_FLOW);
-                //cv::calcOpticalFlowPyrLK(cur_img, prev_img, cur_pts, reverse_pts, reverse_status, err, cv::Size(LK_SIZE, LK_SIZE), 3); 
+                cv::calcOpticalFlowPyrLK(cur_img, prev_img, cur_pts, reverse_pts, reverse_status, err, cv::Size(21, 21), 1, 
+                cv::TermCriteria(cv::TermCriteria::COUNT+cv::TermCriteria::EPS, 30, 0.01), cv::OPTFLOW_USE_INITIAL_FLOW);
+                //cv::calcOpticalFlowPyrLK(cur_img, prev_img, cur_pts, reverse_pts, reverse_status, err, cv::Size(21, 21), 3); 
                 for(size_t i = 0; i < status.size(); i++)
                 {
-                    if(status[i] && reverse_status[i] && distance_2(prev_pts[i], reverse_pts[i]) <= 0.25)
+                    if(status[i] && reverse_status[i] && distance(prev_pts[i], reverse_pts[i]) <= 0.5)
+                    {
                         status[i] = 1;
+                    }
                     else
                         status[i] = 0;
                 }
@@ -172,17 +167,18 @@ map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackIm
         }
         else
         {
-            // TicToc t_og;
-            // cv::cuda::GpuMat cur_gpu_img(cur_img);
-            // cv::cuda::GpuMat prev_gpu_img(prev_img);
+            TicToc t_og;
+            cv::cuda::GpuMat prev_gpu_img(prev_img);
+            cv::cuda::GpuMat cur_gpu_img(cur_img);
             cv::cuda::GpuMat prev_gpu_pts(prev_pts);
             cv::cuda::GpuMat cur_gpu_pts(cur_pts);
             cv::cuda::GpuMat gpu_status;
             if(hasPrediction)
             {
                 cur_gpu_pts = cv::cuda::GpuMat(predict_pts);
-                // cv::Ptr<cv::cuda::SparsePyrLKOpticalFlow> d_pyrLK_sparse_prediction = cv::cuda::SparsePyrLKOpticalFlow::create(cv::Size(LK_SIZE, LK_SIZE), 1, 30, true);
-                d_pyrLK_sparse_prediction->calc(prev_gpu_img, cur_gpu_img, prev_gpu_pts, cur_gpu_pts, gpu_status);
+                cv::Ptr<cv::cuda::SparsePyrLKOpticalFlow> d_pyrLK_sparse = cv::cuda::SparsePyrLKOpticalFlow::create(
+                cv::Size(21, 21), 1, 30, true);
+                d_pyrLK_sparse->calc(prev_gpu_img, cur_gpu_img, prev_gpu_pts, cur_gpu_pts, gpu_status);
                 
                 vector<cv::Point2f> tmp_cur_pts(cur_gpu_pts.cols);
                 cur_gpu_pts.download(tmp_cur_pts);
@@ -200,7 +196,8 @@ map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackIm
                 }
                 if (succ_num < 10)
                 {
-                    // cv::Ptr<cv::cuda::SparsePyrLKOpticalFlow> d_pyrLK_sparse = cv::cuda::SparsePyrLKOpticalFlow::create(cv::Size(LK_SIZE, LK_SIZE), LK_N, 30, false);
+                    cv::Ptr<cv::cuda::SparsePyrLKOpticalFlow> d_pyrLK_sparse = cv::cuda::SparsePyrLKOpticalFlow::create(
+                    cv::Size(21, 21), 3, 30, false);
                     d_pyrLK_sparse->calc(prev_gpu_img, cur_gpu_img, prev_gpu_pts, cur_gpu_pts, gpu_status);
 
                     vector<cv::Point2f> tmp1_cur_pts(cur_gpu_pts.cols);
@@ -214,7 +211,8 @@ map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackIm
             }
             else
             {
-                // cv::Ptr<cv::cuda::SparsePyrLKOpticalFlow> d_pyrLK_sparse = cv::cuda::SparsePyrLKOpticalFlow::create(cv::Size(LK_SIZE, LK_SIZE), LK_N, 30, false);
+                cv::Ptr<cv::cuda::SparsePyrLKOpticalFlow> d_pyrLK_sparse = cv::cuda::SparsePyrLKOpticalFlow::create(
+                cv::Size(21, 21), 3, 30, false);
                 d_pyrLK_sparse->calc(prev_gpu_img, cur_gpu_img, prev_gpu_pts, cur_gpu_pts, gpu_status);
 
                 vector<cv::Point2f> tmp1_cur_pts(cur_gpu_pts.cols);
@@ -229,8 +227,9 @@ map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackIm
             {
                 cv::cuda::GpuMat reverse_gpu_status;
                 cv::cuda::GpuMat reverse_gpu_pts = prev_gpu_pts;
-                // cv::Ptr<cv::cuda::SparsePyrLKOpticalFlow> d_pyrLK_sparse_prediction = cv::cuda::SparsePyrLKOpticalFlow::create(cv::Size(LK_SIZE, LK_SIZE), 1, 30, true);
-                d_pyrLK_sparse_prediction->calc(cur_gpu_img, prev_gpu_img, cur_gpu_pts, reverse_gpu_pts, reverse_gpu_status);
+                cv::Ptr<cv::cuda::SparsePyrLKOpticalFlow> d_pyrLK_sparse = cv::cuda::SparsePyrLKOpticalFlow::create(
+                cv::Size(21, 21), 1, 30, true);
+                d_pyrLK_sparse->calc(cur_gpu_img, prev_gpu_img, cur_gpu_pts, reverse_gpu_pts, reverse_gpu_status);
 
                 vector<cv::Point2f> reverse_pts(reverse_gpu_pts.cols);
                 reverse_gpu_pts.download(reverse_pts);
@@ -240,7 +239,7 @@ map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackIm
 
                 for(size_t i = 0; i < status.size(); i++)
                 {
-                    if(status[i] && reverse_status[i] && distance_2(prev_pts[i], reverse_pts[i]) <= 0.25)
+                    if(status[i] && reverse_status[i] && distance(prev_pts[i], reverse_pts[i]) <= 0.5)
                     {
                         status[i] = 1;
                     }
@@ -258,6 +257,9 @@ map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackIm
         reduceVector(cur_pts, status);
         reduceVector(ids, status);
         reduceVector(track_cnt, status);
+        // ROS_DEBUG("temporal optical flow costs: %fms", t_o.toc());
+        
+        //printf("track cnt %d\n", (int)ids.size());
     }
 
     for (auto &n : track_cnt)
@@ -265,8 +267,14 @@ map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackIm
 
     if (1)
     {
+        //rejectWithF();
+        ROS_DEBUG("set mask begins");
+        TicToc t_m;
         setMask();
-
+        // ROS_DEBUG("set mask costs %fms", t_m.toc());
+        // printf("set mask costs %fms\n", t_m.toc());
+        ROS_DEBUG("detect feature begins");
+        
         int n_max_cnt = MAX_CNT - static_cast<int>(cur_pts.size());
         if(!USE_GPU)
         {
@@ -279,7 +287,7 @@ map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackIm
                     cout << "mask type wrong " << endl;
                 cv::goodFeaturesToTrack(cur_img, n_pts, MAX_CNT - cur_pts.size(), 0.01, MIN_DIST, mask);
                 // printf("good feature to track costs: %fms\n", t_t.toc());
-                std::cout << "n_pts size: "<< n_pts.size() << std::endl;
+                std::cout << "n_pts size: "<< n_pts.size()<<std::endl;
             }
             else
                 n_pts.clear();
@@ -319,8 +327,8 @@ map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackIm
                 n_pts.clear();
         }
 
-        // ROS_DEBUG("add feature begins");
-        // TicToc t_a;
+        ROS_DEBUG("add feature begins");
+        TicToc t_a;
         addPoints();
         // ROS_DEBUG("selectFeature costs: %fms", t_a.toc());
         // printf("selectFeature costs: %fms\n", t_a.toc());
@@ -344,19 +352,17 @@ map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackIm
             vector<uchar> status, statusRightLeft;
             if(!USE_GPU_ACC_FLOW)
             {
-                // TicToc t_check;
+                TicToc t_check;
                 vector<float> err;
                 // cur left ---- cur right
-                cv::calcOpticalFlowPyrLK(cur_img, rightImg, cur_pts, cur_right_pts, status, err, cv::Size(LK_SIZE, LK_SIZE), LK_N);
+                cv::calcOpticalFlowPyrLK(cur_img, rightImg, cur_pts, cur_right_pts, status, err, cv::Size(21, 21), 3);
                 // reverse check cur right ---- cur left
                 if(FLOW_BACK)
                 {
-                    // cv::calcOpticalFlowPyrLK(rightImg, cur_img, cur_right_pts, reverseLeftPts, statusRightLeft, err, cv::Size(LK_SIZE, LK_SIZE), LK_N);
-                    reverseLeftPts = cur_pts;
-                    cv::calcOpticalFlowPyrLK(rightImg, cur_img, cur_right_pts, reverseLeftPts, statusRightLeft, err, cv::Size(LK_SIZE, LK_SIZE), 1, cv::TermCriteria(cv::TermCriteria::COUNT+cv::TermCriteria::EPS, 30, 0.01), cv::OPTFLOW_USE_INITIAL_FLOW);
+                    cv::calcOpticalFlowPyrLK(rightImg, cur_img, cur_right_pts, reverseLeftPts, statusRightLeft, err, cv::Size(21, 21), 3);
                     for(size_t i = 0; i < status.size(); i++)
                     {
-                        if(status[i] && statusRightLeft[i] && inBorder(cur_right_pts[i]) && distance_2(cur_pts[i], reverseLeftPts[i]) <= 0.25)
+                        if(status[i] && statusRightLeft[i] && inBorder(cur_right_pts[i]) && distance(cur_pts[i], reverseLeftPts[i]) <= 0.5)
                             status[i] = 1;
                         else
                             status[i] = 0;
@@ -366,13 +372,14 @@ map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackIm
             }
             else
             {
-                // TicToc t_og1;
-                // cv::cuda::GpuMat cur_gpu_img(cur_img);
-            	// cv::cuda::GpuMat right_gpu_Img(rightImg);
+                TicToc t_og1;
+                cv::cuda::GpuMat cur_gpu_img(cur_img);
+                cv::cuda::GpuMat right_gpu_Img(rightImg);
                 cv::cuda::GpuMat cur_gpu_pts(cur_pts);
                 cv::cuda::GpuMat cur_right_gpu_pts;
                 cv::cuda::GpuMat gpu_status;
-                // cv::Ptr<cv::cuda::SparsePyrLKOpticalFlow> d_pyrLK_sparse = cv::cuda::SparsePyrLKOpticalFlow::create(cv::Size(LK_SIZE, LK_SIZE), LK_N, 30, false);
+                cv::Ptr<cv::cuda::SparsePyrLKOpticalFlow> d_pyrLK_sparse = cv::cuda::SparsePyrLKOpticalFlow::create(
+                cv::Size(21, 21), 3, 30, false);
                 d_pyrLK_sparse->calc(cur_gpu_img, right_gpu_Img, cur_gpu_pts, cur_right_gpu_pts, gpu_status);
 
                 vector<cv::Point2f> tmp_cur_right_pts(cur_right_gpu_pts.cols);
@@ -387,10 +394,9 @@ map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackIm
                 {   
                     cv::cuda::GpuMat reverseLeft_gpu_Pts;
                     cv::cuda::GpuMat status_gpu_RightLeft;
-                    // cv::Ptr<cv::cuda::SparsePyrLKOpticalFlow> d_pyrLK_sparse = cv::cuda::SparsePyrLKOpticalFlow::create(cv::Size(LK_SIZE, LK_SIZE), LK_N, 30, false);
-                    reverseLeft_gpu_Pts = cur_right_gpu_pts;
-                    // cv::Ptr<cv::cuda::SparsePyrLKOpticalFlow> d_pyrLK_sparse_prediction = cv::cuda::SparsePyrLKOpticalFlow::create(cv::Size(LK_SIZE, LK_SIZE), 1, 30, true);
-                    d_pyrLK_sparse_prediction->calc(right_gpu_Img, cur_gpu_img, cur_right_gpu_pts, reverseLeft_gpu_Pts, status_gpu_RightLeft);
+                    cv::Ptr<cv::cuda::SparsePyrLKOpticalFlow> d_pyrLK_sparse = cv::cuda::SparsePyrLKOpticalFlow::create(
+                    cv::Size(21, 21), 3, 30, false);
+                    d_pyrLK_sparse->calc(right_gpu_Img, cur_gpu_img, cur_right_gpu_pts, reverseLeft_gpu_Pts, status_gpu_RightLeft);
 
                     vector<cv::Point2f> tmp_reverseLeft_Pts(reverseLeft_gpu_Pts.cols);
                     reverseLeft_gpu_Pts.download(tmp_reverseLeft_Pts);
@@ -401,7 +407,7 @@ map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackIm
                     statusRightLeft = tmp1_status;
                     for(size_t i = 0; i < status.size(); i++)
                     {
-                        if(status[i] && statusRightLeft[i] && inBorder(cur_right_pts[i]) && distance_2(cur_pts[i], reverseLeftPts[i]) <= 0.25)
+                        if(status[i] && statusRightLeft[i] && inBorder(cur_right_pts[i]) && distance(cur_pts[i], reverseLeftPts[i]) <= 0.5)
                             status[i] = 1;
                         else
                             status[i] = 0;
@@ -436,9 +442,6 @@ map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackIm
     prev_time = cur_time;
     hasPrediction = false;
 
-    if (USE_GPU_ACC_FLOW)
-        prev_gpu_img = cur_gpu_img;
-
     prevLeftPtsMap.clear();
     for(size_t i = 0; i < cur_pts.size(); i++)
         prevLeftPtsMap[ids[i]] = cur_pts[i];
@@ -446,8 +449,6 @@ map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackIm
     map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> featureFrame;
     for (size_t i = 0; i < ids.size(); i++)
     {
-        if(std::isnan(cur_un_pts[i].x) || std::isnan(cur_un_pts[i].y))
-            continue;
         int feature_id = ids[i];
         double x, y ,z;
         x = cur_un_pts[i].x;
@@ -470,8 +471,6 @@ map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackIm
     {
         for (size_t i = 0; i < ids_right.size(); i++)
         {
-            if(std::isnan(cur_un_right_pts[i].x) || std::isnan(cur_un_right_pts[i].y))
-                continue;
             int feature_id = ids_right[i];
             double x, y ,z;
             x = cur_un_right_pts[i].x;
