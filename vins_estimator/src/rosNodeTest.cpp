@@ -264,7 +264,8 @@ int main(int argc, char **argv)
     ros::Subscriber sub_cam_switch = n.subscribe("/vins_cam_switch", 100, cam_switch_callback);
 
     std::thread sync_thread{sync_process};
-    ros::spin();
+    ros::MultiThreadedSpinner spinner(3);
+    spinner.spin();
 
     return 0;
 }
